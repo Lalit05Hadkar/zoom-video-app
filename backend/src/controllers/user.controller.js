@@ -1,118 +1,116 @@
 import httpStatus from "http-status";
-import { User } from "../models/user.model.js";
-import bcrypt, { hash } from "bcrypt"
+import bcrypt from "bcrypt";
+import crypto from "node:crypto";
+import { db } from "../db.js";
 
-import crypto from "crypto"
-import { Meeting } from "../models/meeting.model.js";
-const login = async (req, res) => {
+const USERNAME_RE = /^[a-zA-Z0-9_.-]{3,30}$/;
 
-    const { username, password } = req.body;
+const tokenFrom = (req) => {
+    const header = req.headers.authorization || "";
+    if (header.startsWith("Bearer ")) return header.slice(7);
+    return req.query.token || req.body?.token;
+};
 
-    if (!username || !password) {
-        return res.status(400).json({ message: "Please Provide" })
-    }
-
+// Resolves the signed-in user for protected routes.
+const requireUser = async (req, res, next) => {
+    const token = tokenFrom(req);
+    if (!token) return res.status(httpStatus.UNAUTHORIZED).json({ message: "Please sign in" });
     try {
-        const user = await User.findOne({ username });
-        if (!user) {
-            return res.status(httpStatus.NOT_FOUND).json({ message: "User Not Found" })
-        }
-
-
-        let isPasswordCorrect = await bcrypt.compare(password, user.password)
-
-        if (isPasswordCorrect) {
-            let token = crypto.randomBytes(20).toString("hex");
-
-            user.token = token;
-            await user.save();
-            return res.status(httpStatus.OK).json({ token: token })
-        } else {
-            return res.status(httpStatus.UNAUTHORIZED).json({ message: "Invalid Username or password" })
-        }
-
+        const user = await db.findUserByToken(token);
+        if (!user) return res.status(httpStatus.UNAUTHORIZED).json({ message: "Session expired, please sign in again" });
+        req.user = user;
+        next();
     } catch (e) {
-        return res.status(500).json({ message: `Something went wrong ${e}` })
+        res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: e.message });
     }
-}
+};
 
+const login = async (req, res) => {
+    const username = String(req.body.username || "").trim().toLowerCase();
+    const { password } = req.body;
+    if (!username || !password) {
+        return res.status(httpStatus.BAD_REQUEST).json({ message: "Username and password are required" });
+    }
+    try {
+        const user = await db.findUserByUsername(username);
+        if (!user || !(await bcrypt.compare(password, user.password))) {
+            return res.status(httpStatus.UNAUTHORIZED).json({ message: "Invalid username or password" });
+        }
+        const token = crypto.randomBytes(24).toString("hex");
+        await db.setToken(user.username, token);
+        return res.status(httpStatus.OK).json({ token, name: user.name, username: user.username });
+    } catch (e) {
+        return res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: `Something went wrong: ${e.message}` });
+    }
+};
 
 const register = async (req, res) => {
-    const { name, username, password } = req.body;
+    const name = String(req.body.name || "").trim();
+    const username = String(req.body.username || "").trim().toLowerCase();
+    const { password } = req.body;
 
     if (!name || !username || !password) {
-        return res.status(httpStatus.BAD_REQUEST).json({ message: "All fields (name, username, password) are required" });
+        return res.status(httpStatus.BAD_REQUEST).json({ message: "Name, username and password are required" });
     }
-
+    if (!USERNAME_RE.test(username)) {
+        return res.status(httpStatus.BAD_REQUEST).json({ message: "Username must be 3-30 letters, numbers, . _ or -" });
+    }
+    if (String(password).length < 6) {
+        return res.status(httpStatus.BAD_REQUEST).json({ message: "Password must be at least 6 characters" });
+    }
     try {
-        const existingUser = await User.findOne({ username });
-        if (existingUser) {
-            return res.status(httpStatus.CONFLICT).json({ message: "User already exists" });
+        if (await db.findUserByUsername(username)) {
+            return res.status(httpStatus.CONFLICT).json({ message: "That username is already taken" });
         }
-
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        const newUser = new User({
-            name: name,
-            username: username,
-            password: hashedPassword
-        });
-
-        await newUser.save();
-
-        return res.status(httpStatus.CREATED).json({ message: "User Registered" })
-
+        await db.createUser({ name, username, password: await bcrypt.hash(password, 10) });
+        return res.status(httpStatus.CREATED).json({ message: "Account created. You can sign in now." });
     } catch (e) {
-        return res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: `Something went wrong: ${e.message}` })
+        return res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: `Something went wrong: ${e.message}` });
     }
+};
 
-}
+const me = (req, res) => res.json({ name: req.user.name, username: req.user.username });
 
+const logout = async (req, res) => {
+    await db.setToken(req.user.username, null);
+    res.json({ message: "Signed out" });
+};
 
 const getUserHistory = async (req, res) => {
-    const { token } = req.query;
-
-    if (!token) {
-        return res.status(httpStatus.BAD_REQUEST).json({ message: "Token is required" });
-    }
-
     try {
-        const user = await User.findOne({ token: token });
-        if (!user) {
-            return res.status(httpStatus.UNAUTHORIZED).json({ message: "Invalid or expired token" });
-        }
-        const meetings = await Meeting.find({ user_id: user.username })
-        return res.json(meetings)
+        res.json(await db.listMeetings(req.user.username));
     } catch (e) {
-        return res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: `Something went wrong: ${e.message}` })
+        res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: e.message });
     }
-}
+};
 
 const addToHistory = async (req, res) => {
-    const { token, meeting_code } = req.body;
-
-    if (!token || !meeting_code) {
-        return res.status(httpStatus.BAD_REQUEST).json({ message: "Token and meeting code are required" });
-    }
-
+    const meetingCode = String(req.body.meeting_code || "").trim();
+    if (!meetingCode) return res.status(httpStatus.BAD_REQUEST).json({ message: "Meeting code is required" });
     try {
-        const user = await User.findOne({ token: token });
-        if (!user) {
-            return res.status(httpStatus.UNAUTHORIZED).json({ message: "Invalid or expired token" });
-        }
-
-        const newMeeting = new Meeting({
-            user_id: user.username,
-            meetingCode: meeting_code
-        })
-
-        await newMeeting.save();
-
-        return res.status(httpStatus.CREATED).json({ message: "Added code to history" })
+        const meeting = await db.addMeeting({ user_id: req.user.username, meetingCode });
+        res.status(httpStatus.CREATED).json(meeting);
     } catch (e) {
-        return res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: `Something went wrong: ${e.message}` })
+        res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: e.message });
     }
-}
+};
 
+const deleteFromHistory = async (req, res) => {
+    try {
+        await db.deleteMeeting(req.user.username, req.params.id);
+        res.json({ message: "Removed" });
+    } catch (e) {
+        res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: e.message });
+    }
+};
 
-export { login, register, getUserHistory, addToHistory }
+const clearHistory = async (req, res) => {
+    try {
+        await db.clearMeetings(req.user.username);
+        res.json({ message: "History cleared" });
+    } catch (e) {
+        res.status(httpStatus.INTERNAL_SERVER_ERROR).json({ message: e.message });
+    }
+};
+
+export { login, register, me, logout, requireUser, getUserHistory, addToHistory, deleteFromHistory, clearHistory };

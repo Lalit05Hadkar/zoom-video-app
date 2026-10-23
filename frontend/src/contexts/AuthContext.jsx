@@ -1,98 +1,76 @@
 import axios from "axios";
-import httpStatus from "http-status";
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import server from "../environment";
 
-
 export const AuthContext = createContext({});
 
-const client = axios.create({
-    baseURL: `${server}/api/v1/users`
-})
+const client = axios.create({ baseURL: `${server}/api/v1/users` });
 
+client.interceptors.request.use((config) => {
+    const token = localStorage.getItem("token");
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+});
+
+const readUser = () => {
+    try {
+        return JSON.parse(localStorage.getItem("user")) || null;
+    } catch {
+        return null;
+    }
+};
+
+export const errorMessage = (err) =>
+    err?.response?.data?.message || (err?.request ? "Cannot reach the server. Is the backend running?" : err?.message) || "Something went wrong";
 
 export const AuthProvider = ({ children }) => {
+    const navigate = useNavigate();
+    const [userData, setUserData] = useState(readUser);
 
-    const authContext = useContext(AuthContext);
+    const handleRegister = useCallback(async (name, username, password) => {
+        const res = await client.post("/register", { name, username, password });
+        return res.data.message;
+    }, []);
 
+    const handleLogin = useCallback(async (username, password) => {
+        const res = await client.post("/login", { username, password });
+        const user = { name: res.data.name, username: res.data.username };
+        localStorage.setItem("token", res.data.token);
+        localStorage.setItem("user", JSON.stringify(user));
+        setUserData(user);
+        navigate("/home");
+    }, [navigate]);
 
-    const [userData, setUserData] = useState(authContext);
+    const clearSession = useCallback(() => {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        setUserData(null);
+    }, []);
 
+    const handleLogout = useCallback(async () => {
+        try { await client.post("/logout"); } catch { /* token may already be invalid */ }
+        clearSession();
+        navigate("/");
+    }, [clearSession, navigate]);
 
-    const router = useNavigate();
+    const fetchMe = useCallback(async () => {
+        const res = await client.get("/me");
+        localStorage.setItem("user", JSON.stringify(res.data));
+        setUserData(res.data);
+        return res.data;
+    }, []);
 
-    const handleRegister = async (name, username, password) => {
-        try {
-            let request = await client.post("/register", {
-                name: name,
-                username: username,
-                password: password
-            })
+    const getHistoryOfUser = useCallback(async () => (await client.get("/get_all_activity")).data, []);
+    const addToUserHistory = useCallback(async (meetingCode) => (await client.post("/add_to_activity", { meeting_code: meetingCode })).data, []);
+    const deleteHistoryItem = useCallback(async (id) => client.delete(`/activity/${id}`), []);
+    const clearHistory = useCallback(async () => client.delete("/activity"), []);
 
+    const value = useMemo(() => ({
+        userData, setUserData, handleRegister, handleLogin, handleLogout, clearSession, fetchMe,
+        getHistoryOfUser, addToUserHistory, deleteHistoryItem, clearHistory,
+    }), [userData, handleRegister, handleLogin, handleLogout, clearSession, fetchMe,
+        getHistoryOfUser, addToUserHistory, deleteHistoryItem, clearHistory]);
 
-            if (request.status === httpStatus.CREATED) {
-                return request.data.message;
-            }
-        } catch (err) {
-            throw err;
-        }
-    }
-
-    const handleLogin = async (username, password) => {
-        try {
-            let request = await client.post("/login", {
-                username: username,
-                password: password
-            });
-
-            console.log(username, password)
-            console.log(request.data)
-
-            if (request.status === httpStatus.OK) {
-                localStorage.setItem("token", request.data.token);
-                router("/home")
-            }
-        } catch (err) {
-            throw err;
-        }
-    }
-
-    const getHistoryOfUser = async () => {
-        try {
-            let request = await client.get("/get_all_activity", {
-                params: {
-                    token: localStorage.getItem("token")
-                }
-            });
-            return request.data
-        } catch
-         (err) {
-            throw err;
-        }
-    }
-
-    const addToUserHistory = async (meetingCode) => {
-        try {
-            let request = await client.post("/add_to_activity", {
-                token: localStorage.getItem("token"),
-                meeting_code: meetingCode
-            });
-            return request
-        } catch (e) {
-            throw e;
-        }
-    }
-
-
-    const data = {
-        userData, setUserData, addToUserHistory, getHistoryOfUser, handleRegister, handleLogin
-    }
-
-    return (
-        <AuthContext.Provider value={data}>
-            {children}
-        </AuthContext.Provider>
-    )
-
-}
+    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
