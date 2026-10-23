@@ -1,174 +1,115 @@
-import * as React from 'react';
-import Avatar from '@mui/material/Avatar';
-import Button from '@mui/material/Button';
-import CssBaseline from '@mui/material/CssBaseline';
-import TextField from '@mui/material/TextField';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Checkbox from '@mui/material/Checkbox';
-import Link from '@mui/material/Link';
-import Paper from '@mui/material/Paper';
-import Box from '@mui/material/Box';
-import Grid from '@mui/material/Grid';
-import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
-import Typography from '@mui/material/Typography';
-import { createTheme, ThemeProvider } from '@mui/material/styles';
-import { AuthContext } from '../contexts/AuthContext';
-import { Snackbar } from '@mui/material';
-
-
-
-// TODO remove, this demo shouldn't need to reset the theme.
-
-const defaultTheme = createTheme();
+import * as React from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
+import "../App.css";
+import { AuthContext, errorMessage } from "../contexts/AuthContext";
+import { Brand } from "../components/ui";
 
 export default function Authentication() {
-
-    
-
-    const [username, setUsername] = React.useState();
-    const [password, setPassword] = React.useState();
-    const [name, setName] = React.useState();
-    const [error, setError] = React.useState();
-    const [message, setMessage] = React.useState();
-
-
-    const [formState, setFormState] = React.useState(0);
-
-    const [open, setOpen] = React.useState(false)
-
-
+    const [params] = useSearchParams();
+    const navigate = useNavigate();
     const { handleRegister, handleLogin } = React.useContext(AuthContext);
 
-    let handleAuth = async () => {
+    const [mode, setMode] = React.useState(params.get("mode") === "register" ? "register" : "login");
+    const [name, setName] = React.useState("");
+    const [username, setUsername] = React.useState("");
+    const [password, setPassword] = React.useState("");
+    const [showPw, setShowPw] = React.useState(false);
+    const [error, setError] = React.useState("");
+    const [info, setInfo] = React.useState("");
+    const [busy, setBusy] = React.useState(false);
+
+    const isLogin = mode === "login";
+
+    React.useEffect(() => {
+        if (localStorage.getItem("token")) navigate("/home", { replace: true });
+    }, [navigate]);
+
+    const switchMode = (next) => {
+        setMode(next);
+        setError("");
+        setInfo("");
+    };
+
+    const submit = async (e) => {
+        e.preventDefault();
+        setError("");
+        setInfo("");
+        if (!username.trim() || !password || (!isLogin && !name.trim())) {
+            setError("Please fill in all fields.");
+            return;
+        }
+        if (!isLogin && password.length < 6) {
+            setError("Password must be at least 6 characters.");
+            return;
+        }
+        setBusy(true);
         try {
-            if (formState === 0) {
-
-                let result = await handleLogin(username, password)
-
-
-            }
-            if (formState === 1) {
-                let result = await handleRegister(name, username, password);
-                console.log(result);
-                setUsername("");
-                setMessage(result);
-                setOpen(true);
-                setError("")
-                setFormState(0)
-                setPassword("")
+            if (isLogin) {
+                await handleLogin(username.trim(), password);
+            } else {
+                const message = await handleRegister(name.trim(), username.trim(), password);
+                setInfo(message);
+                setMode("login");
+                setPassword("");
             }
         } catch (err) {
-            console.log(err);
-            let message = err?.response?.data?.message || err.message || "An error occurred during authentication";
-            setError(message);
+            setError(errorMessage(err));
+        } finally {
+            setBusy(false);
         }
-    }
-
+    };
 
     return (
-        <ThemeProvider theme={defaultTheme}>
-            <Grid container component="main" sx={{ height: '100vh' }}>
-                <CssBaseline />
-                <Grid
-                    item
-                    xs={false}
-                    sm={4}
-                    md={7}
-                    sx={{
-                        backgroundImage: 'url(https://source.unsplash.com/random?wallpapers)',
-                        backgroundRepeat: 'no-repeat',
-                        backgroundColor: (t) =>
-                            t.palette.mode === 'light' ? t.palette.grey[50] : t.palette.grey[900],
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                    }}
-                />
-                <Grid item xs={12} sm={8} md={5} component={Paper} elevation={6} square>
-                    <Box
-                        sx={{
-                            my: 8,
-                            mx: 4,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                        }}
-                    >
-                        <Avatar sx={{ m: 1, bgcolor: 'secondary.main' }}>
-                            <LockOutlinedIcon />
-                        </Avatar>
+        <div className="auth-page">
+            <aside className="auth-side">
+                <Brand />
+                <div>
+                    <h2>Meet face to face, wherever you are.</h2>
+                    <p>Create an account to start instant meetings, keep your meeting history and rejoin with one click.</p>
+                </div>
+                <small style={{ opacity: 0.7 }}>Guests can also join any meeting without an account.</small>
+            </aside>
 
+            <main className="auth-main">
+                <form className="auth-card" onSubmit={submit} noValidate>
+                    <h1>{isLogin ? "Welcome back" : "Create your account"}</h1>
+                    <p className="sub">{isLogin ? "Sign in to continue to your meetings." : "It takes less than a minute."}</p>
 
-                        <div>
-                            <Button variant={formState === 0 ? "contained" : ""} onClick={() => { setFormState(0) }}>
-                                Sign In
-                            </Button>
-                            <Button variant={formState === 1 ? "contained" : ""} onClick={() => { setFormState(1) }}>
-                                Sign Up
-                            </Button>
+                    <div className="tabs" role="tablist">
+                        <button type="button" role="tab" className={isLogin ? "active" : ""} onClick={() => switchMode("login")}>Sign In</button>
+                        <button type="button" role="tab" className={!isLogin ? "active" : ""} onClick={() => switchMode("register")}>Sign Up</button>
+                    </div>
+
+                    {error && <div className="alert alert-error" role="alert">{error}</div>}
+                    {info && <div className="alert alert-success" role="status">{info}</div>}
+
+                    {!isLogin && (
+                        <div className="field">
+                            <label htmlFor="name">Full name</label>
+                            <input id="name" className="input" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Jane Doe" />
                         </div>
+                    )}
+                    <div className="field">
+                        <label htmlFor="username">Username</label>
+                        <input id="username" className="input" autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} placeholder="janedoe" />
+                    </div>
+                    <div className="field">
+                        <label htmlFor="password">Password</label>
+                        <div className="pw-wrap">
+                            <input id="password" className="input" type={showPw ? "text" : "password"} autoComplete={isLogin ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={isLogin ? "Your password" : "At least 6 characters"} />
+                            <button type="button" aria-label={showPw ? "Hide password" : "Show password"} onClick={() => setShowPw(!showPw)}>
+                                {showPw ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+                            </button>
+                        </div>
+                    </div>
 
-                        <Box component="form" noValidate sx={{ mt: 1 }}>
-                            {formState === 1 ? <TextField
-                                margin="normal"
-                                required
-                                fullWidth
-                                id="username"
-                                label="Full Name"
-                                name="username"
-                                value={name}
-                                autoFocus
-                                onChange={(e) => setName(e.target.value)}
-                            /> : <></>}
-
-                            <TextField
-                                margin="normal"
-                                required
-                                fullWidth
-                                id="username"
-                                label="Username"
-                                name="username"
-                                value={username}
-                                autoFocus
-                                onChange={(e) => setUsername(e.target.value)}
-
-                            />
-                            <TextField
-                                margin="normal"
-                                required
-                                fullWidth
-                                name="password"
-                                label="Password"
-                                value={password}
-                                type="password"
-                                onChange={(e) => setPassword(e.target.value)}
-
-                                id="password"
-                            />
-
-                            <p style={{ color: "red" }}>{error}</p>
-
-                            <Button
-                                type="button"
-                                fullWidth
-                                variant="contained"
-                                sx={{ mt: 3, mb: 2 }}
-                                onClick={handleAuth}
-                            >
-                                {formState === 0 ? "Login " : "Register"}
-                            </Button>
-
-                        </Box>
-                    </Box>
-                </Grid>
-            </Grid>
-
-            <Snackbar
-
-                open={open}
-                autoHideDuration={4000}
-                message={message}
-            />
-
-        </ThemeProvider>
+                    <button type="submit" className="btn btn-primary btn-lg" style={{ width: "100%" }} disabled={busy}>
+                        {busy ? "Please wait…" : isLogin ? "Sign in" : "Create account"}
+                    </button>
+                </form>
+            </main>
+        </div>
     );
 }

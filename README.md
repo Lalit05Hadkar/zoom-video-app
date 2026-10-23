@@ -35,6 +35,14 @@ A full-stack, real-time video conferencing web application built with **React**,
 
 ---
 
+## Database setup
+
+Set `MONGO_URI` (or `MONGO_URL`) to use MongoDB Atlas / a local MongoDB. If it is unset or unreachable,
+the backend automatically stores users and meeting history in `backend/data/db.json` (override with `DATA_FILE`),
+so the app works with zero configuration. Use `MONGO_URI` for any hosted deployment, since the file store
+is not durable on ephemeral hosts.
+
+
 ## 🚀 Getting Started Locally
 
 ### Prerequisites

@@ -5,3 +5,4 @@ frontend/build/
 .env.*
 *.log
 .DS_Store
+backend/data/
